@@ -5121,6 +5121,18 @@ void HELPER(v8m_bx_update_pc)(CPUState *env, uint32_t pc)
                 env->v7m.secure_fault_status |= SECURE_FAULT_INVEP;
                 env->exception_index = EXCP_SECURE;
             } else {
+                /* Bit 0 clear sets EPSR.T to 0, and executing in that state is a UsageFault
+                 * (INVSTATE). But the target is fetched before anything executes, and a fetch
+                 * that is not permitted (an Execute-Never MPU region, or the 0xE0000000+ space
+                 * where instruction fetch is prohibited) is a MemManage fault (IACCVIOL) with
+                 * the target as the stacked PC, which is what silicon reports. So do the
+                 * permission check the fetch would have done, and raise INVSTATE only if the
+                 * fetch would have succeeded. */
+                target_phys_addr_t paddr;
+                if(cpu_handle_mmu_fault(env, pc, ACCESS_INST_FETCH, cpu_mmu_index(env), 0, &paddr) != TRANSLATE_SUCCESS) {
+                    env->regs[15] = pc;
+                    cpu_loop_exit(env);
+                }
                 env->exception_index = EXCP_INVSTATE;
             }
             cpu_loop_exit_restore(env, (uintptr_t)GETPC(), true);
